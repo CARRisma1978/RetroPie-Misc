@@ -81,3 +81,7 @@ Opens a gamelist and suggests Title Case fixes for each `<name>` (e.g. "SUPER MA
 Finds .mp4 video previews that OMX Player on RetroPie can't play (any pixel format other than yuv420p) and makes yuv420p copies of them with FFmpeg. Videos that already play are left alone. See Yuv420p.txt.
 
 > **Use at your own risk.** Most scripts write to a new folder and leave the originals alone, but Moveifsmaller.ps1 and Marquee_comparison.ps1 overwrite files - keep a backup.
+
+## Licence
+
+Released under the MIT Licence - see [LICENSE](LICENSE).
