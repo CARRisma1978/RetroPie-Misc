@@ -1,2 +1,2 @@
 # RetroPie-Misc
-Miscellaneous scripts related to RetroPie
+Miscellaneous scripts related to RetroPie media.
