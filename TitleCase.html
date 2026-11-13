@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XML Title Editor</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            color: #333;
+            background-color: #fafafa;
+        }
+        h2 {
+            margin-top: 0;
+        }
+        .upload-section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #e4e4e7;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .item-card {
+            background: #fff;
+            border: 1px solid #e4e4e7;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            display: grid;
+            grid-template-columns: auto 18px 1fr;
+            column-gap: 12px;
+            row-gap: 12px;
+            align-items: center;
+        }
+        .original-line {
+            color: #71717a; 
+            font-size: 16px;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+        .search-btn {
+            background-color: #f4f4f5;
+            color: #52525b;
+            border: 1px solid #e4e4e7;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            width: max-content;
+            margin: 0;
+            box-shadow: none;
+            transition: all 0.2s;
+        }
+        .search-btn:hover {
+            background-color: #e4e4e7;
+            color: #18181b;
+        }
+        .suggestion-line {
+            color: #dc2626; 
+            font-size: 16px;
+            font-weight: bold; 
+            cursor: pointer;
+        }
+        .highlight {
+            background-color: #fef08a; /* Highlight yellow */
+            color: #dc2626; /* Keep the text red */
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+        .suggestion-checkbox {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            cursor: pointer;
+        }
+        .edit-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d4d4d8;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: inherit;
+            box-sizing: border-box;
+            color: #18181b;
+        }
+        .edit-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+        .primary-btn {
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            width: 100%;
+            margin-top: 10px;
+            box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
+        }
+        .primary-btn:hover {
+            background-color: #1d4ed8;
+        }
+        .success-message {
+            color: #059669;
+            font-weight: 600;
+            background: #d1fae5;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #34d399;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>XML Title Case Fixer</h2>
+    
+    <div class="upload-section">
+        <label for="xmlFile"><strong>Upload your XML file:</strong></label><br><br>
+        <input type="file" id="xmlFile" accept=".xml">
+    </div>
+
+    <div id="listContainer"></div>
+    
+    <button id="changeBtn" class="primary-btn" style="display:none;">Change & Download XML</button>
+
+    <script>
+        let rawXmlText = "";
+        let originalFileName = "updated.xml";
+
+        function smartTitleCase(str) {
+            const minorWords = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'of', 'in', 'into', 'is', 'vs.', 'with', 'le', 'la', 'les', 'el', 'los', 'las', 'il', 'lo', 'de', 'der', 'das']);
+            const isAllCaps = str === str.toUpperCase();
+
+            return str.split(' ').map((word, index, arr) => {
+                if (/[0-9]/.test(word)) {
+                    if (isAllCaps && /^[0-9]+(ST|ND|RD|TH)$/.test(word)) {
+                        return word.toLowerCase();
+                    }
+                    return word; 
+                }
+
+                if (!isAllCaps && word.length > 1 && /[A-Z]/.test(word.slice(1))) {
+                    return word; 
+                }
+
+                let lowerWord = word.toLowerCase();
+                if (index === 0 || index === arr.length - 1 || !minorWords.has(lowerWord)) {
+                    return lowerWord.charAt(0).toUpperCase() + lowerWord.slice(1);
+                }
+                
+                return lowerWord;
+            }).join(' ');
+        }
+
+        // Function to compare strings and highlight differences
+        function highlightDiff(original, suggested) {
+            let result = "";
+            for (let i = 0; i < suggested.length; i++) {
+                if (original[i] !== suggested[i]) {
+                    result += `<span class="highlight">${suggested[i]}</span>`;
+                } else {
+                    result += suggested[i];
+                }
+            }
+            return result;
+        }
+
+        document.getElementById('xmlFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            originalFileName = file.name;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                rawXmlText = event.target.result;
+                
+                const targetNodes = [];
+                const regex = /<name>([\s\S]*?)<\/name>/gi;
+                let match;
+                
+                while ((match = regex.exec(rawXmlText)) !== null) {
+                    targetNodes.push({ textContent: match[1] });
+                }
+                
+                renderList(targetNodes);
+            };
+            reader.readAsText(file);
+        });
+
+        function renderList(nodes) {
+            const container = document.getElementById('listContainer');
+            
+            if (nodes.length === 0) {
+                container.innerHTML = "<p>No target tags found in this file.</p>";
+                document.getElementById('changeBtn').style.display = 'none';
+                return;
+            }
+
+            let html = '';
+            let changesFound = false;
+
+            for (let i = 0; i < nodes.length; i++) {
+                const originalText = nodes[i].textContent;
+                const suggestedText = smartTitleCase(originalText);
+
+                if (originalText !== suggestedText) {
+                    changesFound = true;
+                    const safeOriginalText = originalText.replace(/"/g, '&quot;');
+                    const safeSuggestedText = suggestedText.replace(/"/g, '&quot;');
+                    
+                    // Generate the highlighted version for display
+                    const highlightedSuggestion = highlightDiff(originalText, suggestedText);
+                    
+                    html += `
+                        <div class="item-card">
+                            <button type="button" class="search-btn" data-text="${safeOriginalText}">Copy & Search</button>
+                            <div></div> 
+                            <div class="original-line">${originalText}</div>
+                            
+                            <div></div>
+                            <input type="checkbox" class="suggestion-checkbox auto-check" id="auto-check-${i}" data-index="${i}">
+                            <label class="suggestion-line" for="auto-check-${i}">${highlightedSuggestion}</label>
+
+                            <div></div>
+                            <input type="checkbox" class="suggestion-checkbox manual-check" id="manual-check-${i}" data-index="${i}">
+                            <input type="text" class="edit-input" id="input-${i}" value="${safeSuggestedText}">
+                        </div>`;
+                }
+            }
+
+            if (!changesFound) {
+                container.innerHTML = '<div class="success-message">✓ All games are already in perfect Title Case! No suggestions needed.</div>';
+                document.getElementById('changeBtn').style.display = 'none';
+            } else {
+                container.innerHTML = html;
+                document.getElementById('changeBtn').style.display = 'block';
+            }
+        }
+
+        // Handle clicks on checkboxes to make them mutually exclusive
+        document.getElementById('listContainer').addEventListener('change', function(e) {
+            if (e.target.classList.contains('auto-check')) {
+                if (e.target.checked) {
+                    const index = e.target.getAttribute('data-index');
+                    document.getElementById(`manual-check-${index}`).checked = false;
+                }
+            } else if (e.target.classList.contains('manual-check')) {
+                if (e.target.checked) {
+                    const index = e.target.getAttribute('data-index');
+                    document.getElementById(`auto-check-${index}`).checked = false;
+                }
+            }
+        });
+
+        // Handle typing in the text box to automatically select the manual checkbox
+        document.getElementById('listContainer').addEventListener('input', function(e) {
+            if (e.target.classList.contains('edit-input')) {
+                const index = e.target.id.split('-')[1];
+                document.getElementById(`manual-check-${index}`).checked = true;
+                document.getElementById(`auto-check-${index}`).checked = false;
+            }
+        });
+
+        // Handle LaunchBox search
+        document.getElementById('listContainer').addEventListener('click', function(e) {
+            if (e.target.classList.contains('search-btn')) {
+                const textToSearch = e.target.getAttribute('data-text');
+                const btn = e.target;
+                
+                navigator.clipboard.writeText(textToSearch).then(() => {
+                    const originalBtnText = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    btn.style.backgroundColor = '#d1fae5';
+                    btn.style.color = '#059669';
+                    btn.style.borderColor = '#34d399';
+                    
+                    setTimeout(() => {
+                        btn.textContent = originalBtnText;
+                        btn.style = ''; 
+                    }, 1500);
+
+                    const searchUrl = 'https://gamesdb.launchbox-app.com/games/results?title=' + encodeURIComponent(textToSearch);
+                    window.open(searchUrl, '_blank');
+                }).catch(err => {
+                    console.error('Clipboard copy failed: ', err);
+                    alert('Could not copy to clipboard, but opening search anyway.');
+                    const searchUrl = 'https://gamesdb.launchbox-app.com/games/results?title=' + encodeURIComponent(textToSearch);
+                    window.open(searchUrl, '_blank');
+                });
+            }
+        });
+
+        // Generate and download the updated XML
+        document.getElementById('changeBtn').addEventListener('click', function() {
+            let currentIndex = 0;
+            
+            const newXmlStr = rawXmlText.replace(/<name>([\s\S]*?)<\/name>/gi, function(match, originalName) {
+                const autoCb = document.querySelector(`#auto-check-${currentIndex}`);
+                const manualCb = document.querySelector(`#manual-check-${currentIndex}`);
+                const input = document.querySelector(`#input-${currentIndex}`);
+                
+                let finalReplacement = match; // Default to keeping the original
+
+                // Check which box is ticked and update accordingly
+                if (autoCb && autoCb.checked) {
+                    finalReplacement = `<name>${smartTitleCase(originalName)}</name>`;
+                } else if (manualCb && manualCb.checked && input) {
+                    finalReplacement = `<name>${input.value}</name>`;
+                }
+                
+                currentIndex++;
+                return finalReplacement;
+            });
+
+            const blob = new Blob([newXmlStr], { type: 'text/xml' });
+            const url = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            downloadLink.download = 'edited_' + originalFileName; 
+            
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>

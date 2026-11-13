@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetroPie Gamelist Merger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-input-label {
+            display: block;
+            padding: 12px 20px;
+            background-color: #4A5568;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: background-color 0.2s;
+        }
+        .file-input-label:hover {
+            background-color: #2D3748;
+        }
+        #outputXml {
+            white-space: pre;
+            overflow-wrap: normal;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-4xl bg-gray-800 rounded-xl shadow-2xl p-6 md:p-8">
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-white">RetroPie Gamelist Merger</h1>
+            <p class="text-gray-400 mt-2">Upload two `gamelist.xml` files to merge missing metadata.</p>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label class="font-semibold text-lg mb-2 block" for="baseFile">1. Upload Base File</label>
+                <p class="text-sm text-gray-500 mb-2">This is the original file you want to add tags to.</p>
+                <input type="file" id="baseFile" class="hidden" accept=".xml">
+                <label for="baseFile" class="file-input-label">
+                    <span id="baseFileName">Choose Base gamelist.xml</span>
+                </label>
+            </div>
+            <div>
+                <label class="font-semibold text-lg mb-2 block" for="newFile">2. Upload New File</label>
+                 <p class="text-sm text-gray-500 mb-2">This file contains the new metadata to be added.</p>
+                <input type="file" id="newFile" class="hidden" accept=".xml">
+                <label for="newFile" class="file-input-label">
+                     <span id="newFileName">Choose New gamelist.xml</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <div class="text-center mb-6">
+            <button id="processBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 w-full md:w-auto">
+                Compare & Merge Files
+            </button>
+        </div>
+        
+        <!-- Message/Error Display -->
+        <div id="message" class="text-center text-red-400 mb-4 font-medium"></div>
+
+        <!-- Output Section -->
+        <div id="outputContainer" class="hidden">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold">Merged XML Output</h2>
+                <button id="copyBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg text-sm">
+                    Copy to Clipboard
+                </button>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-4 max-h-96 overflow-auto">
+                <code id="outputXml" class="text-sm text-white"></code>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- SHARED GAMELIST HELPERS ---
+        // The gamelists are worked on as plain text, so everything you don't
+        // change stays exactly as it was (layout, tabs, comments, "&" characters
+        // that aren't written as &amp;). The output always has Unix (LF) line endings.
+
+        // Tag order inside a <game> (the same as Sort_gamelist.ps1)
+        const TAG_ORDER = ['path', 'name', 'image', 'thumbnail', 'marquee', 'video', 'desc',
+                           'developer', 'publisher', 'releasedate', 'players', 'genre'];
+
+        function tagRank(name) {
+            const i = TAG_ORDER.indexOf(name.toLowerCase());
+            return i === -1 ? TAG_ORDER.length : i;   // other tags go after the known ones
+        }
+
+        // Windows (CRLF) and stray CR line endings -> Unix (LF)
+        function toLF(text) {
+            return text.replace(/\r\n/g, '\n').replace(/\r/g, '');
+        }
+
+        // Every <game>...</game> block: { start, end, text }
+        function findGames(text) {
+            const games = [];
+            const re = /<game\b[^>]*>[\s\S]*?<\/game\s*>/gi;
+            let m;
+            while ((m = re.exec(text)) !== null) {
+                games.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+            }
+            return games;
+        }
+
+        // The tags directly inside one game block: { name, raw, start, end, value }
+        function findTags(gameText) {
+            const tags = [];
+            const open = gameText.match(/^<game\b[^>]*>/i)[0];
+            const closeAt = gameText.search(/<\/game\s*>$/i);
+            const re = /<([A-Za-z_][\w.\-]*)\b[^>]*?(?:\/>|>([\s\S]*?)<\/\1\s*>)/g;
+            re.lastIndex = open.length;
+            let m;
+            while ((m = re.exec(gameText)) !== null && m.index < closeAt) {
+                tags.push({ name: m[1].toLowerCase(), raw: m[0], start: m.index,
+                            end: m.index + m[0].length, value: m[2] || '' });
+            }
+            return tags;
+        }
+
+        // The game's <path>, for matching: trimmed, & written either way, any case
+        function pathKey(tags) {
+            const p = tags.find(t => t.name === 'path');
+            if (!p) return null;
+            return p.value.trim().replace(/&amp;/gi, '&').toLowerCase();
+        }
+
+        // Where a tag's line starts / ends (to add or remove whole lines)
+        function lineStart(text, pos) {
+            const nl = text.lastIndexOf('\n', pos - 1);
+            return nl + 1;
+        }
+        function onOwnLine(text, start, end) {
+            const ls = lineStart(text, start);
+            const before = text.slice(ls, start);
+            let le = text.indexOf('\n', end);
+            if (le === -1) le = text.length;
+            const after = text.slice(end, le);
+            return /^[ \t]*$/.test(before) && /^[ \t]*$/.test(after)
+                ? { from: ls, to: Math.min(le + 1, text.length) } : null;
+        }
+
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(file);
+            });
+        }
+
+        function copyText(text, button, doneLabel) {
+            const original = button.textContent;
+            const done = () => {
+                button.textContent = doneLabel;
+                setTimeout(() => { button.textContent = original; }, 2000);
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+            } else {
+                fallbackCopy(text, done);
+            }
+        }
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { console.error(e); }
+            document.body.removeChild(ta);
+        }
+
+        // --- MERGE ---
+        // For each game in the base file, finds the same game in the new file (by
+        // <path>, any case) and adds the tags the base game doesn't have. Each added
+        // tag goes on its own line, indented like the game's other tags, in the
+        // usual tag order (path, name, image, thumbnail, marquee, video, desc,
+        // developer, publisher, releasedate, players, genre, then any others).
+        function mergeGamelists(baseText, newText) {
+            const newGames = new Map();
+            for (const g of findGames(newText)) {
+                const tags = findTags(g.text);
+                const key = pathKey(tags);
+                if (key !== null && !newGames.has(key)) newGames.set(key, tags);
+            }
+
+            let out = '';
+            let last = 0;
+            let gamesUpdated = 0;
+            let tagsAdded = 0;
+            let matched = 0;
+
+            for (const g of findGames(baseText)) {
+                let block = g.text;
+                const key = pathKey(findTags(block));
+                if (key === null || !newGames.has(key)) continue;
+                matched++;
+
+                const before = tagsAdded;
+                for (const newTag of newGames.get(key)) {
+                    const tags = findTags(block);
+                    if (tags.some(t => t.name === newTag.name)) continue;
+
+                    // Indent the same as the game's first tag (a tab if it can't tell)
+                    let indent = '\t';
+                    if (tags.length) {
+                        const ls = lineStart(block, tags[0].start);
+                        const ws = block.slice(ls, tags[0].start);
+                        if (/^[ \t]+$/.test(ws)) indent = ws;
+                    }
+
+                    // Before the first tag that comes later in the order, else before </game>
+                    const rank = tagRank(newTag.name);
+                    const next = tags.find(t => tagRank(t.name) > rank);
+                    const closeAt = block.search(/<\/game\s*>$/i);
+                    const at = next ? next.start : closeAt;
+                    const ls = lineStart(block, at);
+                    const ownLine = /^[ \t]*$/.test(block.slice(ls, at));
+                    const line = indent + newTag.raw + '\n';
+                    if (ownLine) {
+                        block = block.slice(0, ls) + line + block.slice(ls);
+                    } else {
+                        block = block.slice(0, at) + '\n' + line + block.slice(at);
+                    }
+                    tagsAdded++;
+                }
+                if (tagsAdded > before) {
+                    gamesUpdated++;
+                    out += baseText.slice(last, g.start) + block;
+                    last = g.end;
+                }
+            }
+            out += baseText.slice(last);
+            return { text: toLF(out), matched, gamesUpdated, tagsAdded };
+        }
+
+        // --- PAGE ---
+        const baseFileInput = document.getElementById('baseFile');
+        const newFileInput = document.getElementById('newFile');
+        const baseFileNameSpan = document.getElementById('baseFileName');
+        const newFileNameSpan = document.getElementById('newFileName');
+        const processBtn = document.getElementById('processBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const outputContainer = document.getElementById('outputContainer');
+        const outputXmlEl = document.getElementById('outputXml');
+        const messageEl = document.getElementById('message');
+
+        baseFileInput.addEventListener('change', () => {
+            baseFileNameSpan.textContent = baseFileInput.files.length > 0 ? baseFileInput.files[0].name : 'Choose Base gamelist.xml';
+        });
+        newFileInput.addEventListener('change', () => {
+            newFileNameSpan.textContent = newFileInput.files.length > 0 ? newFileInput.files[0].name : 'Choose New gamelist.xml';
+        });
+
+        processBtn.addEventListener('click', async () => {
+            messageEl.textContent = '';
+            messageEl.className = 'text-center text-red-400 mb-4 font-medium';
+            outputContainer.classList.add('hidden');
+
+            const baseFile = baseFileInput.files[0];
+            const newFile = newFileInput.files[0];
+            if (!baseFile || !newFile) {
+                messageEl.textContent = 'Please select both a base and a new file.';
+                return;
+            }
+
+            try {
+                processBtn.textContent = 'Processing...';
+                processBtn.disabled = true;
+
+                const [baseText, newText] = await Promise.all([readFileAsText(baseFile), readFileAsText(newFile)]);
+                if (!findGames(baseText).length || !findGames(newText).length) {
+                    throw new Error('No <game> entries found in one or both files.');
+                }
+
+                const r = mergeGamelists(baseText, newText);
+                outputXmlEl.textContent = r.text;
+                outputContainer.classList.remove('hidden');
+                messageEl.className = 'text-center text-green-400 mb-4 font-medium';
+                messageEl.textContent = `Done. ${r.matched} game(s) matched, ${r.gamesUpdated} updated, ${r.tagsAdded} tag(s) added.`;
+            } catch (error) {
+                messageEl.textContent = `An error occurred: ${error.message}`;
+                console.error(error);
+            } finally {
+                processBtn.textContent = 'Compare & Merge Files';
+                processBtn.disabled = false;
+            }
+        });
+
+        copyBtn.addEventListener('click', () => copyText(outputXmlEl.textContent, copyBtn, 'Copied!'));
+    </script>
+</body>
+</html>

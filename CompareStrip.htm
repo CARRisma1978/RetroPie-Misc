@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XML File Comparator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom styles for the result box */
+        #result-output {
+            white-space: pre-wrap; /* Ensures long lines wrap */
+            word-break: break-all; /* Breaks long strings to prevent overflow */
+            background-color: #1e293b; /* A dark slate color */
+            color: #e2e8f0; /* A light gray color for text */
+            border-radius: 0.5rem;
+            padding: 1rem;
+            max-height: 60vh; /* Limit height and make it scrollable */
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        /* Style to allow newlines in the error message */
+        #message-box {
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <main class="w-full max-w-4xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
+        
+        <div>
+            <h1 class="text-3xl font-bold text-center text-gray-800 dark:text-white">XML Game List Modifier</h1>
+            <p class="text-center text-gray-600 dark:text-gray-400 mt-2">
+                For each game in File 2, this tool finds the matching game in File 1 (by <code>&lt;path&gt;</code>) and removes only the tags that also exist in the File 2 entry. It will then delete any games that only have a <code>&lt;path&gt;</code> tag remaining.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="flex flex-col">
+                <label for="file1" class="mb-2 font-semibold text-gray-700 dark:text-gray-300">File 1 (The file to be modified)</label>
+                <input type="file" id="file1" accept=".xml,text/xml" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-800 transition">
+            </div>
+            <div class="flex flex-col">
+                <label for="file2" class="mb-2 font-semibold text-gray-700 dark:text-gray-300">File 2 (The reference file)</label>
+                <input type="file" id="file2" accept=".xml,text/xml" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 dark:file:bg-green-900 file:text-green-700 dark:file:text-green-300 hover:file:bg-green-100 dark:hover:file:bg-green-800 transition">
+            </div>
+        </div>
+
+        <div class="flex justify-center">
+            <button id="process-button" class="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-opacity-75 transition-transform transform hover:scale-105">
+                Process Files
+            </button>
+        </div>
+
+        <div id="result-container" class="hidden">
+            <div class="flex justify-center items-center gap-4 mb-4">
+                <h2 class="text-2xl font-bold text-center">Modified File 1 Result</h2>
+                <button id="copy-button" class="px-4 py-2 bg-gray-600 text-white text-sm font-semibold rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75 transition">
+                    Copy
+                </button>
+            </div>
+            <div id="result-output"></div>
+        </div>
+
+        <div id="message-box" class="text-center text-red-500 font-medium"></div>
+
+    </main>
+
+    <script>
+        // --- SHARED GAMELIST HELPERS ---
+        // The gamelists are worked on as plain text, so everything you don't
+        // change stays exactly as it was (layout, tabs, comments, "&" characters
+        // that aren't written as &amp;). The output always has Unix (LF) line endings.
+
+        // Tag order inside a <game> (the same as Sort_gamelist.ps1)
+        const TAG_ORDER = ['path', 'name', 'image', 'thumbnail', 'marquee', 'video', 'desc',
+                           'developer', 'publisher', 'releasedate', 'players', 'genre'];
+
+        function tagRank(name) {
+            const i = TAG_ORDER.indexOf(name.toLowerCase());
+            return i === -1 ? TAG_ORDER.length : i;   // other tags go after the known ones
+        }
+
+        // Windows (CRLF) and stray CR line endings -> Unix (LF)
+        function toLF(text) {
+            return text.replace(/\r\n/g, '\n').replace(/\r/g, '');
+        }
+
+        // Every <game>...</game> block: { start, end, text }
+        function findGames(text) {
+            const games = [];
+            const re = /<game\b[^>]*>[\s\S]*?<\/game\s*>/gi;
+            let m;
+            while ((m = re.exec(text)) !== null) {
+                games.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+            }
+            return games;
+        }
+
+        // The tags directly inside one game block: { name, raw, start, end, value }
+        function findTags(gameText) {
+            const tags = [];
+            const open = gameText.match(/^<game\b[^>]*>/i)[0];
+            const closeAt = gameText.search(/<\/game\s*>$/i);
+            const re = /<([A-Za-z_][\w.\-]*)\b[^>]*?(?:\/>|>([\s\S]*?)<\/\1\s*>)/g;
+            re.lastIndex = open.length;
+            let m;
+            while ((m = re.exec(gameText)) !== null && m.index < closeAt) {
+                tags.push({ name: m[1].toLowerCase(), raw: m[0], start: m.index,
+                            end: m.index + m[0].length, value: m[2] || '' });
+            }
+            return tags;
+        }
+
+        // The game's <path>, for matching: trimmed, & written either way, any case
+        function pathKey(tags) {
+            const p = tags.find(t => t.name === 'path');
+            if (!p) return null;
+            return p.value.trim().replace(/&amp;/gi, '&').toLowerCase();
+        }
+
+        // Where a tag's line starts / ends (to add or remove whole lines)
+        function lineStart(text, pos) {
+            const nl = text.lastIndexOf('\n', pos - 1);
+            return nl + 1;
+        }
+        function onOwnLine(text, start, end) {
+            const ls = lineStart(text, start);
+            const before = text.slice(ls, start);
+            let le = text.indexOf('\n', end);
+            if (le === -1) le = text.length;
+            const after = text.slice(end, le);
+            return /^[ \t]*$/.test(before) && /^[ \t]*$/.test(after)
+                ? { from: ls, to: Math.min(le + 1, text.length) } : null;
+        }
+
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(file);
+            });
+        }
+
+        function copyText(text, button, doneLabel) {
+            const original = button.textContent;
+            const done = () => {
+                button.textContent = doneLabel;
+                setTimeout(() => { button.textContent = original; }, 2000);
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+            } else {
+                fallbackCopy(text, done);
+            }
+        }
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { console.error(e); }
+            document.body.removeChild(ta);
+        }
+
+        // --- COMPARE & STRIP ---
+        // For each game in File 2, finds the same game in File 1 (by <path>, any
+        // case) and removes the tags File 2's entry also has (never <path>). A game
+        // left with only its <path> is removed completely. Removed tags take their
+        // whole line with them; nothing else in File 1 is changed.
+        function stripGamelist(text1, text2) {
+            const file2Tags = new Map();
+            for (const g of findGames(text2)) {
+                const tags = findTags(g.text);
+                const key = pathKey(tags);
+                if (key !== null) file2Tags.set(key, new Set(tags.map(t => t.name)));
+            }
+
+            let modified = 0;
+            let deleted = 0;
+            let out = text1;
+
+            // Work from the end of the file back, so earlier positions stay correct
+            const games = findGames(text1).reverse();
+            for (const g of games) {
+                const tags = findTags(g.text);
+                const key = pathKey(tags);
+                if (key === null || !file2Tags.has(key)) continue;
+                const remove = file2Tags.get(key);
+
+                let block = g.text;
+                let changed = false;
+                for (const t of tags.slice().reverse()) {
+                    if (t.name === 'path' || !remove.has(t.name)) continue;
+                    const whole = onOwnLine(block, t.start, t.end);
+                    if (whole) {
+                        block = block.slice(0, whole.from) + block.slice(whole.to);
+                    } else {
+                        block = block.slice(0, t.start) + block.slice(t.end);
+                    }
+                    changed = true;
+                }
+                if (!changed) continue;
+                modified++;
+
+                const left = findTags(block);
+                let from = g.start, to = g.end;
+                if (left.length === 1 && left[0].name === 'path') {
+                    // Only <path> left: remove the whole game, with its line(s)
+                    const whole = onOwnLine(out, g.start, g.end);
+                    if (whole) { from = whole.from; to = whole.to; }
+                    block = '';
+                    deleted++;
+                }
+                out = out.slice(0, from) + block + out.slice(to);
+            }
+            return { text: toLF(out), modified, deleted };
+        }
+
+        // --- PAGE ---
+        const file1Input = document.getElementById('file1');
+        const file2Input = document.getElementById('file2');
+        const processButton = document.getElementById('process-button');
+        const resultContainer = document.getElementById('result-container');
+        const resultOutput = document.getElementById('result-output');
+        const messageBox = document.getElementById('message-box');
+        const copyButton = document.getElementById('copy-button');
+
+        processButton.addEventListener('click', handleFileProcessing);
+        copyButton.addEventListener('click', () => copyText(resultOutput.textContent, copyButton, 'Copied!'));
+
+        async function handleFileProcessing() {
+            messageBox.textContent = '';
+            messageBox.className = 'text-center text-red-500 font-medium';
+            resultContainer.classList.add('hidden');
+
+            if (!file1Input.files[0] || !file2Input.files[0]) {
+                messageBox.textContent = 'Please select both XML files before processing.';
+                return;
+            }
+
+            try {
+                const [text1, text2] = await Promise.all([
+                    readFileAsText(file1Input.files[0]),
+                    readFileAsText(file2Input.files[0])
+                ]);
+                if (!findGames(text1).length || !findGames(text2).length) {
+                    throw new Error('No <game> entries found in one or both files.');
+                }
+
+                const r = stripGamelist(text1, text2);
+                resultOutput.textContent = r.text;
+                resultContainer.classList.remove('hidden');
+
+                let message = `Processing complete. ${r.modified} game(s) were modified.`;
+                if (r.deleted > 0) message += ` ${r.deleted} empty game(s) were deleted.`;
+                messageBox.textContent = message;
+                messageBox.className = 'text-center text-green-500 font-medium';
+            } catch (error) {
+                messageBox.textContent = `An error occurred: ${error.message}`;
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>
