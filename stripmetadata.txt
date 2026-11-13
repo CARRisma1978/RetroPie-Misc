@@ -1,0 +1,48 @@
+stripmetadata.ps1
+=================
+
+Strips hidden metadata from .mp4 videos with FFmpeg. Nothing is re-encoded: the picture and sound are copied exactly as they are, so there's no quality loss and it's quick. Videos are read from a source folder and written to an output folder, keeping the exact subfolder structure. The originals are never changed.
+
+Normally run before Yuv420p.ps1, which reads its output (V2).
+
+Requirements
+------------
+ffmpeg.exe. The script uses the first one it finds:
+  1. in the same folder as the script
+  2. in the folder the script is run from
+  3. on the PATH
+The one used is shown at the start ("Using ffmpeg: ...").
+
+Setup
+-----
+The two folder names are at the top of the script. They can be names relative to the folder you run the script from, or full paths (e.g. "C:\Users\email\OneDrive\Desktop\V2"). The output folder is created if missing.
+
+    $sourceDirName = "C:\Users\email\OneDrive\Desktop\V"     original videos
+    $outputDirName = "C:\Users\email\OneDrive\Desktop\V2"    stripped videos
+
+If the source folder is missing, the script stops with a message. The output folder can't be the source folder or inside it. Only .mp4 files are processed (in the source folder and all its subfolders); other files are ignored.
+
+The FFmpeg options
+------------------
+-map_metadata -1  Removes the metadata (titles, comments, encoder tags, dates and so on).
+-c copy           Copies the video and audio streams as they are, without re-encoding.
+
+The full command for one video is:
+
+    ffmpeg -i "INPUT.mp4" -map_metadata -1 -c copy "OUTPUT.mp4"
+
+Existing output files
+---------------------
+If an output file already exists you are asked:
+
+    [Y]es / [N]o / [A]ll / [S]kip all
+
+Report
+------
+While running, each file gets one line, e.g.
+
+    [3/40] Jazz2.mp4 [SAVED 1.2 KB] (2048.6 -> 2047.4 KB)
+
+showing SAVED, ADDED or NO CHANGE, SKIPPED, or FAILED (FFmpeg's last messages are then shown underneath and any half-written file is removed; otherwise they're kept quiet). At the end there is one summary:
+
+    SUMMARY   files found, processed, skipped and failed, original and new size in MB, and the total saved or added

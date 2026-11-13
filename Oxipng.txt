@@ -1,0 +1,57 @@
+Oxipng.ps1
+==========
+
+Losslessly shrinks EmulationStation artwork with OxiPNG: covers first, then marquees. The pictures look exactly the same - only the files get smaller. Each set is read from its own source folder and written to its own output folder, keeping the exact subfolder structure. The originals are never changed.
+
+Normally run after ImageMagick.ps1, on its output (C2 / M2).
+
+Requirements
+------------
+oxipng.exe. The script uses the first one it finds:
+  1. in the same folder as the script
+  2. in the folder the script is run from
+  3. on the PATH
+The one used is shown at the start ("Using oxipng: ...").
+
+Setup
+-----
+The four folder names are at the top of the script. They can be names relative to the folder you run the script from, or full paths (e.g. "C:\Users\email\OneDrive\Desktop\C2"). Output folders are created if missing.
+
+    $coverSourceDirName   = "C2"    covers to optimise
+    $coverOutputDirName   = "C3"    optimised covers
+    $marqueeSourceDirName = "M2"    marquees to optimise
+    $marqueeOutputDirName = "M3"    optimised marquees
+
+If a source folder is missing, that set is skipped with a message and the other set still runs. Only .png files are processed (OxiPNG handles nothing else); other files are ignored.
+
+The OxiPNG options (the same for both sets)
+-------------------------------------------
+--opt max     The highest optimisation level: the smallest files, but the slowest - a large folder can take a while.
+--strip safe  Removes metadata that doesn't affect how the image looks (text comments, software tags); keeps what does (colour profile, gamma).
+--alpha       Optimises fully transparent pixels. They're invisible, so the picture doesn't change, but they compress better.
+
+Each image is written straight to its matching path in the output folder (--out), rather than using --dir, so the subfolders are kept and every file's saving can be reported. The optimisation itself is the same. An image OxiPNG can't make any smaller is copied across unchanged, so the output folder is always complete.
+
+For reference, the equivalent single command for one folder is:
+
+    oxipng --opt max --strip safe --alpha --dir "OUTPUT FOLDER" "INPUT FOLDER\*.png"
+
+Existing output files
+---------------------
+If an output file already exists you are asked:
+
+    [Y]es / [N]o / [A]ll / [S]kip all
+
+The question starts afresh for marquees, so an "All" or "Skip all" given for covers doesn't carry over.
+
+Report
+------
+While running, each file gets one line, e.g.
+
+    [3/40] Jazz2.png [SAVED 12.4 KB] (85.2 -> 72.8 KB)
+
+showing SAVED, ADDED or NO CHANGE, SKIPPED, or FAILED (OxiPNG's own messages are then shown underneath; otherwise they're kept quiet). At the end there are three summaries:
+
+    COVERS SUMMARY     files found, processed and skipped, original and new
+    MARQUEES SUMMARY   size in MB, and the total saved or added
+    COMBINED SUMMARY   the same totals for both sets together

@@ -1,0 +1,53 @@
+ImageMagick.ps1
+===============
+
+Batch-processes EmulationStation artwork with ImageMagick: covers first, then marquees. Each set is read from its own source folder and written to its own output folder, keeping the exact subfolder structure. The originals are never changed.
+
+Requirements: ImageMagick installed, with "magick" on the PATH.
+
+Setup
+-----
+The four folder names are at the top of the script. They are relative to the folder you run the script from; output folders are created if missing.
+
+    $coverSourceDirName   = "C"     original covers
+    $coverOutputDirName   = "C2"    processed covers
+    $marqueeSourceDirName = "M"     original marquees
+    $marqueeOutputDirName = "M2"    processed marquees
+
+If a source folder is missing, that set is skipped with a message and the
+other set still runs.
+
+What happens to each set
+------------------------
+Feature                 Covers                                  Marquees
+Purpose                 Standardise format, reduce file size    Crop empty space, limit size
+Input files             PNG, JPG, JPEG                          PNG only
+Output format           Always PNG                              PNG (same name)
+Maximum size            700x700 pixels                          600x600 pixels
+Removes empty borders   No                                      Yes (-trim +repage)
+Metadata                Stripped (-strip)                       Kept
+
+Covers: every image is fitted within 700x700 pixels (only shrunk, never enlarged; shape kept), stripped of hidden metadata, saved as PNG with the best compression (-quality 95), and keeps its original colour type (-define png:preserve-colortype=true) so simple 8-bit images aren't bloated
+into 32-bit files.
+
+Marquees: transparent or solid-colour borders are cut away (-trim), the canvas is reset so the image forgets its old boundaries (+repage), and it is then fitted within 600x600 pixels (only shrunk, never enlarged; shape kept).
+
+Existing output files
+---------------------
+If an output file already exists you are asked:
+
+    [Y]es / [N]o / [A]ll / [S]kip all
+
+The question starts afresh for marquees, so an "All" or "Skip all" given for covers doesn't carry over.
+
+Report
+------
+While running, each file gets one line, e.g.
+
+    [3/40] Jazz2.png [SAVED 12.4 KB] (85.2 -> 72.8 KB)
+
+showing SAVED, ADDED or NO CHANGE, SKIPPED, or FAILED if ImageMagick produced no output. At the end there are three summaries:
+
+    COVERS SUMMARY     files found, processed and skipped, original and new
+    MARQUEES SUMMARY   size in MB, and the total saved or added
+    COMBINED SUMMARY   the same totals for both sets together

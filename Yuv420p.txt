@@ -1,0 +1,61 @@
+Yuv420p.ps1
+===========
+
+Finds RetroPie video previews that OMX Player won't play (any pixel format other than yuv420p, e.g. yuv444p) and makes yuv420p copies of them with FFmpeg. Videos that are already yuv420p are left alone and not copied, so the output folder holds only the converted videos, in the same subfolder structure, ready to copy over the old files on the Pi. The originals are never changed.
+
+Normally run after stripmetadata.ps1, on its output (V2).
+
+Requirements
+------------
+ffmpeg.exe and ffprobe.exe. For each one, the script uses the first it finds:
+  1. in the same folder as the script
+  2. in the folder the script is run from
+  3. on the PATH
+The ones used are shown at the start ("Using ffmpeg: ..." and "Using ffprobe: ...").
+
+Setup
+-----
+The two folder names are at the top of the script. They can be names relative to the folder you run the script from, or full paths (e.g. "C:\Users\email\OneDrive\Desktop\V3"). The output folder is created only if there is something to convert.
+
+    $sourceDirName = "V2"    videos to check
+    $outputDirName = "V3"    converted videos
+
+If the source folder is missing, the script stops with a message. The output folder can't be the source folder or inside it. Only .mp4 files are processed (in the source folder and all its subfolders); other files are ignored.
+
+What happens
+------------
+Step 1 - Scan: ffprobe reads the pixel format of each video's first video stream, with a progress bar while it works. yuv420p videos are counted as OK and nothing more is done with them. Any other format is listed with its name, e.g.
+
+    [12/40] Jazz2.mp4 [yuv444p]
+
+A video ffprobe can't read is shown as PROBE FAILED, with ffprobe's messages underneath, and isn't converted. The scan ends with a tally: already yuv420p, need converting, and couldn't be read.
+
+Step 2 - Convert: only the videos that need it. The video is re-encoded; the sound is copied unchanged.
+
+-pix_fmt yuv420p  Converts the pixel format to yuv420p, which OMX Player can play.
+-map_metadata -1  Removes unnecessary metadata.
+-c:a copy         Copies the audio stream as it is, rather than re-encoding it.
+-preset veryslow  The best compression for the quality: smaller files, but slow - a large batch can take a while.
+-crf 25           The quality level (higher means smaller and lower quality). 25 gives a smaller file with no noticeable quality loss; FFmpeg's default is 23.
+
+The full command for one video is:
+
+    ffmpeg -i "INPUT.mp4" -pix_fmt yuv420p -map_metadata -1 -c:a copy -preset veryslow -crf 25 "OUTPUT.mp4"
+
+Existing output files
+---------------------
+If an output file already exists you are asked:
+
+    [Y]es / [N]o / [A]ll / [S]kip all
+
+Report
+------
+While converting, each video gets one line, showing its original pixel format, e.g.
+
+    [3/12] Jazz2.mp4 (yuv444p) [SAVED 120.4 KB] (850.2 -> 729.8 KB)
+
+showing SAVED, ADDED or NO CHANGE, SKIPPED, or FAILED (FFmpeg's last messages are then shown underneath and any half-written file is removed; otherwise they're kept quiet). At the end there is one summary:
+
+    SUMMARY   videos scanned, already yuv420p, couldn't be read (if any), need converting, then converted, skipped and failed, original and new size in MB, the total saved or added, and the folder the converted videos are in
+
+If every video is already yuv420p, the summary says there is nothing to convert.
